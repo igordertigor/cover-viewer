@@ -1,0 +1,99 @@
+#!/usr/bin/env python
+"""
+Usage:
+    cmus-cover-server [options]
+
+Options:
+    -s <SIZE>, --size=<SIZE>
+        size of individual images [default: 50%]
+    -x, --xwax
+        xwax mode (show left, right + central preview)
+"""
+import os
+from docopt import docopt
+import threading
+import webview
+import bottle
+import jinja2
+
+import base64
+
+TEMPLATES = {
+    'xwax': jinja2.Template(''.join([
+        '<table>',
+        '<col width="{{ size }}">',
+        '<col width="{{ size }}">',
+        '<col width="{{ size }}">',
+        '<tr><th>Left</th><th>Preview</th><th>Right</th></tr>',
+        '<tr><td>{{ left }}</td><td>{{ update }}</td><td>{{ right }}</td></tr>',
+        '</table>'])),
+    'regular': jinja2.Template(''.join([
+        '<table>',
+        '<col width="{{ size }}">',
+        '<col width="{{ size }}">',
+        '<tr><th>Currently playing</th><th>Preview cover</th></tr>',
+        '<tr><td>{{ playing }}</td><td>{{ update }}</td></tr>',
+        '</table>'])),
+}
+TEMPLATE = None
+GLOBAL_STATE = {
+    'playing': '',
+    'update': '',
+    'left': '',
+    'right': '',
+    'size': '50%',
+}
+
+
+@bottle.get('/load_img')
+def load_img():
+    if 'path' in bottle.request.query:
+        path = bottle.request.query.path
+        print('Setting path', path)
+
+        _, fmt = os.path.splitext(path)
+        print(fmt)
+    else:
+        path = None
+
+    if path:
+        with open(path, 'rb') as f:
+            im = base64.b64encode(f.read())
+
+        img = ('<img src="data:image/{};base64, {}"'
+               ' style="width:100%;"></img>'
+               .format(fmt[1:], im.decode()))
+    else:
+        img = 'NO COVER'
+
+    GLOBAL_STATE[bottle.request.query.loc] = img
+    html = format_status()
+
+    webview.load_html(html)
+
+
+def start_server():
+    bottle.run(host='localhost', port='34543')
+
+
+def format_status():
+    return TEMPLATE.render(**GLOBAL_STATE)
+
+
+if __name__ == '__main__':
+    args = docopt(__doc__)
+    GLOBAL_STATE['size'] = args['--size']
+    if args['--xwax']:
+        print('Choosing xwax template')
+        TEMPLATE = TEMPLATES['xwax']
+        window_width = 900
+    else:
+        print('Choosing regular template')
+        TEMPLATE = TEMPLATES['regular']
+        window_width = 600
+    t = threading.Thread(target=start_server)
+    t.start()
+    window = webview.create_window('Current title',
+                                   width=window_width,
+                                   height=330,
+                                   resizable=True)
